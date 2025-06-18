@@ -4,9 +4,10 @@ import { join, extname } from 'path';
 import * as fs from 'fs';
 import * as path from 'path';
 import { FaissStore } from '@langchain/community/vectorstores/faiss';
-import { OpenAIEmbeddings } from '@langchain/openai';
+import { HuggingFaceTransformersEmbeddings } from '@langchain/community/embeddings/hf_transformers';
 import { Document } from 'langchain/document';
 import { ChatAnthropic } from '@langchain/anthropic';
+import Papa from 'papaparse';
 
 const SHARED_FOLDER = process.env.SHARED_FOLDER || join(__dirname, '../../shared');
 const VECTOR_INDEX_PATH = join(__dirname, '../../vector.index');
@@ -56,10 +57,9 @@ export class AppService {
     } else if (ext === '.txt') {
       text = fs.readFileSync(filePath, 'utf8');
     } else if (ext === '.csv') {
-      const csvParse = require('csv-parse/sync');
       const content = fs.readFileSync(filePath, 'utf8');
-      const records = csvParse.parse(content, { columns: false, skip_empty_lines: true });
-      text = records.map((row: string[]) => row.join(', ')).join('\n');
+      const parsed = Papa.parse(content, { skipEmptyLines: true });
+      text = parsed.data.map((row: string[]) => row.join(', ')).join('\n');
     } else if (ext === '.json') {
       const content = fs.readFileSync(filePath, 'utf8');
       const obj = JSON.parse(content);
@@ -84,7 +84,9 @@ export class AppService {
    * @param chunks Array of {text, source}
    */
   async embedAndStoreChunks(chunks: {text: string, source: string}[]) {
-    const embeddings = new OpenAIEmbeddings();
+    const embeddings = new HuggingFaceTransformersEmbeddings({
+      modelName: 'Xenova/all-MiniLM-L6-v2'
+    });
     let vectorStore: FaissStore;
     // Try to load existing index
     try {
@@ -106,7 +108,9 @@ export class AppService {
    * Retrieve top relevant chunks for a query.
    */
   async retrieveRelevantChunks(query: string) {
-    const embeddings = new OpenAIEmbeddings();
+    const embeddings = new HuggingFaceTransformersEmbeddings({
+      modelName: 'Xenova/all-MiniLM-L6-v2'
+    });
     let vectorStore: FaissStore;
     try {
       vectorStore = await FaissStore.load(VECTOR_INDEX_PATH, embeddings);
@@ -126,7 +130,7 @@ export class AppService {
   async generateAnswerWithContext(prompt: string, contexts: {text: string, source: string}[]) {
     // Build augmented prompt with context
     const contextText = contexts.map((ctx, i) => `Source [${i+1}] (${ctx.source}):\n${ctx.text}`).join('\n\n');
-    const fullPrompt = `You are an AI assistant. Use the following context to answer the user's question. Cite the sources in your answer.\n\nContext:\n${contextText}\n\nQuestion: ${prompt}`;
+    const fullPrompt = `You are an AI assistant. Use the following context to answer the user's question.\n\nContext:\n${contextText}\n\nQuestion: ${prompt}`;
     const model = new ChatAnthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
       model: 'claude-3-haiku-20240307', // or another Claude model you have access to
@@ -134,8 +138,7 @@ export class AppService {
     });
     const response = await model.invoke(fullPrompt);
     return {
-      answer: response.content,
-      contexts
+      answer: response.content
     };
   }
 }
